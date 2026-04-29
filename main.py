@@ -8,7 +8,6 @@ import re
 from aiohttp import web
 from bs4 import BeautifulSoup
 
-# Данные из окружения Render
 DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 DISCORD_CHANNEL_ID = 1343517491241943082
@@ -19,7 +18,7 @@ ds_bot = commands.Bot(command_prefix='!', intents=intents)
 
 @ds_bot.event
 async def on_ready():
-    print(f'Бот {ds_bot.user} запущен и готов к работе!')
+    print(f'Бот {ds_bot.user} готов раздавать стиль!')
 
 tg_bot = TgBot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
@@ -29,59 +28,72 @@ async def handle_channel_post(message: types.Message):
     ds_channel = ds_bot.get_channel(DISCORD_CHANNEL_ID)
     if not ds_channel: return
 
-    # 1. Вытаскиваем чистый текст без скрытых ссылок и спецсимволов
     raw_html = message.html_text or ""
     soup = BeautifulSoup(raw_html, 'html.parser')
-    
-    # Вычищаем кастомные эмодзи ТГ (те самые айдишники)
     for tg_emoji in soup.find_all('tg-emoji'):
         tg_emoji.replace_with(tg_emoji.text)
     
-    clean_text = soup.get_text(separator="\n")
-
-    # 2. Обработка наград (кнобсы, стардаст, ревайвы)
-    clean_text = re.sub(r'(\d+)\s*🚪', r'\1 кнобсов', clean_text)
-    clean_text = re.sub(r'(\d+)\s*⭐️', r'\1 стардаста', clean_text)
-    clean_text = re.sub(r'(\d+)\s*❤️', r'\1 ревайв', clean_text)
-
-    # 3. Чистка мусора: хэштеги, лишние звезды, смайлы
-    clean_text = clean_text.replace('#dailyrun', '')
-    clean_text = clean_text.replace('*', '') # Убираем старые звезды полностью
+    # Полная очистка от мусора
+    text = soup.get_text(separator="\n")
+    text = text.replace('\xa0', ' ').replace('*', '').replace('#dailyrun', '')
     
-    bad_emojis = ['🔥', '🚪', '💩', '🏮', '🛑', '👀', '🫨', '😃', '🦇', '⚫️', '🏆', '✅', '🌟']
-    for emoji in bad_emojis:
-        clean_text = clean_text.replace(emoji, '')
+    # Замена игровых валют
+    text = re.sub(r'(\d+)\s*🚪', r'\1 кнобсов', text)
+    text = re.sub(r'(\d+)\s*⭐️', r'\1 стардаста', text)
+    text = re.sub(r'(\d+)\s*❤️', r'\1 ревайв', text)
 
-    # 4. Форматирование под "Прекрасный вид"
-    lines = clean_text.split('\n')
-    formatted_lines = []
+    bad_emojis = ['🔥', '🚪', '💩', '🏮', '🛑', '👀', '🫨', '😃', '🦇', '⚫️', '🏆', '✅', '🌟']
+    for em в bad_emojis: text = text.replace(em, '')
+
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    
+    final_msg = []
+    entities = []
     
     for line in lines:
-        line = line.strip()
-        if not line: continue
-        
-        # Делаем заголовок ДЕНЬ XXX жирным и добавляем разделитель
+        # 1. Заголовок дня
         if "ДЕНЬ" in line.upper():
-            day_num = re.search(r'\d+', line)
-            if day_num:
-                formatted_lines.append(f"**ДЕНЬ {day_num.group()}:**")
-                formatted_lines.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
-                continue
+            day_match = re.search(r'\d+', line)
+            if day_match:
+                final_msg.append(f"**ДЕНЬ {day_match.group()}:**")
+                final_msg.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
         
-        # Форматируем ключевые строки
-        if "Награда:" in line:
-            formatted_lines.append(f"**Награда:** {line.replace('Награда:', '').strip()}")
-        elif "Завтра:" in line:
-            formatted_lines.append(f"**Завтра:** {line.replace('Завтра:', '').strip()}")
+        # 2. Локации (25 Дверей — Отель...)
+        elif "Дверей" in line:
+            parts = line.split('—')
+            final_msg.append(f"***{parts[0].strip()}***")
+            if len(parts) > 1:
+                locs = [loc.strip() for loc in parts[1].split(',') if loc.strip()]
+                final_msg.append(f"`{chr(10).join(locs)}`") # Локации в блоке кода
+
+        # 3. Время прохождения
         elif "Проходится за" in line:
-            formatted_lines.append(f"*{line.strip()}*")
+            # Убираем лишние тире в начале, если есть
+            clean_time = line.lstrip('— ').strip()
+            final_msg.append(f"*— {clean_time}*")
+
+        # 4. Награда
+        elif "Награда:" in line:
+            val = line.replace("Награда:", "").strip()
+            # Формат: Награда: **`текст`**
+            final_msg.append(f"**Награда:** **`{val.replace('+', chr(10) + '+')}`**")
+
+        # 5. Завтра
+        elif "Завтра:" in line:
+            val = line.replace("Завтра:", "").strip()
+            final_msg.append(f"**Завтра:** **`{val.replace('+', chr(10) + '+')}`**")
+
+        # 6. Всё остальное — это монстры/сущности
         else:
-            # Обычные строки (монстры, комнаты)
-            formatted_lines.append(line)
+            entities.append(f"**- {line}**")
 
-    final_text = "\n".join(formatted_lines)
+    # Вставляем монстров после времени прохождения, но перед наградой
+    if entities:
+        final_msg.insert(-2, "\n".join(entities))
 
-    # 5. Работа с фото/видео
+    result_text = "\n".join(final_msg)
+
+    # Фото/Видео
     discord_file = None
     file_id = None
     if message.photo: file_id = message.photo[-1].file_id
@@ -94,14 +106,12 @@ async def handle_channel_post(message: types.Message):
             discord_file = discord.File(fp=io.BytesIO(downloaded.read()), filename="daily_run.jpg")
         except: pass
 
-    # 6. Отправка
     try:
-        await ds_channel.send(content=final_text if final_text else None, file=discord_file)
+        await ds_channel.send(content=result_text, file=discord_file)
     except Exception as e:
-        print(f"Ошибка отправки: {e}")
+        print(f"Ошибка: {e}")
 
-# Web-сервер для Render (Uptime)
-async def handle(request): return web.Response(text="OK")
+async def handle(r): return web.Response(text="OK")
 async def web_server():
     app = web.Application()
     app.router.add_get('/', handle)
