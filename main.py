@@ -8,6 +8,7 @@ import re
 from aiohttp import web
 from bs4 import BeautifulSoup
 
+# Данные из окружения Render
 DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 DISCORD_CHANNEL_ID = 1343517491241943082
@@ -18,7 +19,7 @@ ds_bot = commands.Bot(command_prefix='!', intents=intents)
 
 @ds_bot.event
 async def on_ready():
-    print(f'{ds_bot.user} is online')
+    print(f'Бот {ds_bot.user} запущен и готов к работе!')
 
 tg_bot = TgBot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
@@ -26,84 +27,87 @@ dp = Dispatcher()
 @dp.channel_post()
 async def handle_channel_post(message: types.Message):
     ds_channel = ds_bot.get_channel(DISCORD_CHANNEL_ID)
-    if not ds_channel:
-        return
+    if not ds_channel: return
 
-    raw_html_text = message.html_text or "" 
+    # 1. Вытаскиваем чистый текст без скрытых ссылок и спецсимволов
+    raw_html = message.html_text or ""
+    soup = BeautifulSoup(raw_html, 'html.parser')
     
-    soup = BeautifulSoup(raw_html_text, 'html.parser')
-    for emoji_tag in soup.find_all('tg-emoji'):
-        emoji_tag.replace_with(emoji_tag.text)
+    # Вычищаем кастомные эмодзи ТГ (те самые айдишники)
+    for tg_emoji in soup.find_all('tg-emoji'):
+        tg_emoji.replace_with(tg_emoji.text)
+    
+    clean_text = soup.get_text(separator="\n")
+
+    # 2. Обработка наград (кнобсы, стардаст, ревайвы)
+    clean_text = re.sub(r'(\d+)\s*🚪', r'\1 кнобсов', clean_text)
+    clean_text = re.sub(r'(\d+)\s*⭐️', r'\1 стардаста', clean_text)
+    clean_text = re.sub(r'(\d+)\s*❤️', r'\1 ревайв', clean_text)
+
+    # 3. Чистка мусора: хэштеги, лишние звезды, смайлы
+    clean_text = clean_text.replace('#dailyrun', '')
+    clean_text = clean_text.replace('*', '') # Убираем старые звезды полностью
+    
+    bad_emojis = ['🔥', '🚪', '💩', '🏮', '🛑', '👀', '🫨', '😃', '🦇', '⚫️', '🏆', '✅', '🌟']
+    for emoji in bad_emojis:
+        clean_text = clean_text.replace(emoji, '')
+
+    # 4. Форматирование под "Прекрасный вид"
+    lines = clean_text.split('\n')
+    formatted_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line: continue
         
-    text_to_send = str(soup)
+        # Делаем заголовок ДЕНЬ XXX жирным и добавляем разделитель
+        if "ДЕНЬ" in line.upper():
+            day_num = re.search(r'\d+', line)
+            if day_num:
+                formatted_lines.append(f"**ДЕНЬ {day_num.group()}:**")
+                formatted_lines.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
+                continue
+        
+        # Форматируем ключевые строки
+        if "Награда:" in line:
+            formatted_lines.append(f"**Награда:** {line.replace('Награда:', '').strip()}")
+        elif "Завтра:" in line:
+            formatted_lines.append(f"**Завтра:** {line.replace('Завтра:', '').strip()}")
+        elif "Проходится за" in line:
+            formatted_lines.append(f"*{line.strip()}*")
+        else:
+            # Обычные строки (монстры, комнаты)
+            formatted_lines.append(line)
 
-    text_to_send = text_to_send.replace('\xa0', ' ')
+    final_text = "\n".join(formatted_lines)
 
-    text_to_send = re.sub(r'(\d+)\s*🚪', r'\1 кнобсов', text_to_send)
-    text_to_send = re.sub(r'(\d+)\s*⭐️', r'\1 стардаста', text_to_send)
-    text_to_send = re.sub(r'(\d+)\s*❤️', r'\1 ревайв', text_to_send)
-
-    text_to_send = text_to_send.replace('#dailyrun', '')
-    text_to_send = re.sub(r'(ДЕНЬ\s*\d+)', r'\1:', text_to_send)
-    text_to_send = re.sub(r'—\s*Проходится', 'Проходится', text_to_send)
-
-    emojis_to_remove = [
-        '🔥', '🚪', '💩', '🏮', '🛑', '👀', '🫨', 
-        '😃', '🦇', '⚫️', '🏆', '✅', '⭐️', '❤️', '🌟'
-    ]
-    for emoji in emojis_to_remove:
-        text_to_send = text_to_send.replace(emoji, '')
-
-    text_to_send = text_to_send.replace('<b>', '').replace('</b>', '')
-    text_to_send = text_to_send.replace('<i>', '').replace('</i>', '')
-    text_to_send = text_to_send.replace('<blockquote>', '').replace('</blockquote>', '')
-    text_to_send = text_to_send.replace('*', '')
-
-    text_to_send = re.sub(r' +', ' ', text_to_send)
-    text_to_send = re.sub(r' ,', ',', text_to_send)
-    text_to_send = re.sub(r',\s+', ', ', text_to_send)
-
-    lines = [line.strip() for line in text_to_send.split('\n')]
-    lines = [line for line in lines if line]
-    text_to_send = '\n'.join(lines)
-
-    file_id = None
-    file_name = None
-
-    if message.photo:
-        file_id = message.photo[-1].file_id
-        file_name = "photo.jpg"
-    elif message.video:
-        file_id = message.video.file_id
-        file_name = "video.mp4"
-
+    # 5. Работа с фото/видео
     discord_file = None
+    file_id = None
+    if message.photo: file_id = message.photo[-1].file_id
+    elif message.video: file_id = message.video.file_id
+
     if file_id:
         try:
             file_info = await tg_bot.get_file(file_id)
-            downloaded_file = await tg_bot.download_file(file_info.file_path)
-            discord_file = discord.File(fp=io.BytesIO(downloaded_file.read()), filename=file_name)
-        except Exception as e:
-            pass
+            downloaded = await tg_bot.download_file(file_info.file_path)
+            discord_file = discord.File(fp=io.BytesIO(downloaded.read()), filename="daily_run.jpg")
+        except: pass
 
+    # 6. Отправка
     try:
-        if discord_file:
-            await ds_channel.send(content=text_to_send if text_to_send else None, file=discord_file)
-        elif text_to_send.strip():
-            await ds_channel.send(content=text_to_send)
+        await ds_channel.send(content=final_text if final_text else None, file=discord_file)
     except Exception as e:
-         pass
+        print(f"Ошибка отправки: {e}")
 
-async def handle(request):
-    return web.Response(text="Bot is alive!")
-
+# Web-сервер для Render (Uptime)
+async def handle(request): return web.Response(text="OK")
 async def web_server():
     app = web.Application()
     app.router.add_get('/', handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
-    await site.start()
+    await web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080))).start()
 
 async def main():
     asyncio.create_task(web_server())
