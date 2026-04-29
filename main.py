@@ -74,7 +74,7 @@ async def handle_channel_post(message: types.Message):
             p = re.split(r'[—–-]', line, 1)
             doors_info = f"***{p[0].strip()}***"
             if len(p) > 1:
-                sub_locs = [s.strip() for s in p[1].split(',') if s.strip()]
+                sub_locs = [s.strip().lstrip('—–- ').strip() for s in p[1].split(',') if s.strip().lstrip('—–- ').strip()]
                 sections.extend(sub_locs)
             mode = "LOCS"
             continue
@@ -86,36 +86,40 @@ async def handle_channel_post(message: types.Message):
 
         if "Награда:" in line:
             mode = "REW"
-            val = line.replace("Награда:", "").strip()
+            val = line.replace("Награда:", "").strip().lstrip('—–- ').strip()
             if val: rewards.append(val)
             continue
         
         if "Завтра:" in line:
             mode = "TOM"
-            val = line.replace("Завтра:", "").strip()
+            val = line.replace("Завтра:", "").strip().lstrip('—–- ').strip()
             if val: tomorrow.append(val)
             continue
 
+        clean_line = line.lstrip('—–- ').strip()
+        if not clean_line: continue
+
         if mode == "LOCS":
-            sub_locs = [s.strip() for s in line.split(',') if s.strip()]
+            sub_locs = [s.strip().lstrip('—–- ').strip() for s in line.split(',') if s.strip().lstrip('—–- ').strip()]
             sections.extend(sub_locs)
         elif mode == "MONS":
-            clean_line = line.lstrip('—–- ').strip()
             if any(word in clean_line for word in KNOWN_SECTIONS):
                 sections.append(clean_line)
-            elif clean_line not in ["—", "–", "-"]:
+            else:
                 entities.append(clean_line)
         elif mode == "REW":
-            rewards.append(line)
+            rewards.append(clean_line)
         elif mode == "TOM":
-            tomorrow.append(line)
+            tomorrow.append(clean_line)
 
     if day_info: final_msg.append(day_info)
     if doors_info: final_msg.append(doors_info)
     
     if sections:
         final_msg.append("`Секции:`")
-        for s in sections: final_msg.append(f"***{s}***")
+        for s in sections: 
+            if s and s not in ["—", "–", "-"]:
+                final_msg.append(f"***{s}***")
     
     if time_info: final_msg.append(time_info)
     
@@ -124,11 +128,11 @@ async def handle_channel_post(message: types.Message):
         for e in entities: final_msg.append(f"** {e}**")
     
     if rewards:
-        r_text = "\n+".join([r.lstrip('+').strip() for r in rewards if r.strip()])
+        r_text = "\n+".join([r.lstrip('+ ').strip() for r in rewards if r.strip()])
         final_msg.append(f"**Награда:** **`{r_text}`**")
     
     if tomorrow:
-        t_text = "\n+".join([t.lstrip('+').strip() for t in tomorrow if t.strip()])
+        t_text = "\n+".join([t.lstrip('+ ').strip() for t in tomorrow if t.strip()])
         final_msg.append(f"**Завтра:** **`{t_text}`**")
 
     res = "\n".join(final_msg)
