@@ -18,7 +18,7 @@ ds_bot = commands.Bot(command_prefix='!', intents=intents)
 
 @ds_bot.event
 async def on_ready():
-    print(f'Бот {ds_bot.user} готов раздавать стиль!')
+    print(f'{ds_bot.user} online')
 
 tg_bot = TgBot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
@@ -33,67 +33,64 @@ async def handle_channel_post(message: types.Message):
     for tg_emoji in soup.find_all('tg-emoji'):
         tg_emoji.replace_with(tg_emoji.text)
     
-    # Полная очистка от мусора
     text = soup.get_text(separator="\n")
     text = text.replace('\xa0', ' ').replace('*', '').replace('#dailyrun', '')
     
-    # Замена игровых валют
     text = re.sub(r'(\d+)\s*🚪', r'\1 кнобсов', text)
     text = re.sub(r'(\d+)\s*⭐️', r'\1 стардаста', text)
     text = re.sub(r'(\d+)\s*❤️', r'\1 ревайв', text)
 
     bad_emojis = ['🔥', '🚪', '💩', '🏮', '🛑', '👀', '🫨', '😃', '🦇', '⚫️', '🏆', '✅', '🌟']
-    for em в bad_emojis: text = text.replace(em, '')
+    for em in bad_emojis:
+        text = text.replace(em, '')
 
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     
     final_msg = []
     entities = []
+    reward_block = ""
+    tomorrow_block = ""
     
     for line in lines:
-        # 1. Заголовок дня
         if "ДЕНЬ" in line.upper():
             day_match = re.search(r'\d+', line)
             if day_match:
                 final_msg.append(f"**ДЕНЬ {day_match.group()}:**")
                 final_msg.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
         
-        # 2. Локации (25 Дверей — Отель...)
         elif "Дверей" in line:
             parts = line.split('—')
             final_msg.append(f"***{parts[0].strip()}***")
             if len(parts) > 1:
                 locs = [loc.strip() for loc in parts[1].split(',') if loc.strip()]
-                final_msg.append(f"`{chr(10).join(locs)}`") # Локации в блоке кода
+                final_msg.append(f"`{chr(10).join(locs)}`")
 
-        # 3. Время прохождения
         elif "Проходится за" in line:
-            # Убираем лишние тире в начале, если есть
             clean_time = line.lstrip('— ').strip()
             final_msg.append(f"*— {clean_time}*")
 
-        # 4. Награда
         elif "Награда:" in line:
             val = line.replace("Награда:", "").strip()
-            # Формат: Награда: **`текст`**
-            final_msg.append(f"**Награда:** **`{val.replace('+', chr(10) + '+')}`**")
+            formatted_val = val.replace('+', '\n+')
+            reward_block = f"**Награда:** **`{formatted_val}`**"
 
-        # 5. Завтра
         elif "Завтра:" in line:
             val = line.replace("Завтра:", "").strip()
-            final_msg.append(f"**Завтра:** **`{val.replace('+', chr(10) + '+')}`**")
+            formatted_val = val.replace('+', '\n+')
+            tomorrow_block = f"**Завтра:** **`{formatted_val}`**"
 
-        # 6. Всё остальное — это монстры/сущности
         else:
             entities.append(f"**- {line}**")
 
-    # Вставляем монстров после времени прохождения, но перед наградой
     if entities:
-        final_msg.insert(-2, "\n".join(entities))
+        final_msg.append("\n".join(entities))
+    if reward_block:
+        final_msg.append(reward_block)
+    if tomorrow_block:
+        final_msg.append(tomorrow_block)
 
     result_text = "\n".join(final_msg)
 
-    # Фото/Видео
     discord_file = None
     file_id = None
     if message.photo: file_id = message.photo[-1].file_id
@@ -108,8 +105,7 @@ async def handle_channel_post(message: types.Message):
 
     try:
         await ds_channel.send(content=result_text, file=discord_file)
-    except Exception as e:
-        print(f"Ошибка: {e}")
+    except: pass
 
 async def handle(r): return web.Response(text="OK")
 async def web_server():
@@ -121,6 +117,7 @@ async def web_server():
 
 async def main():
     asyncio.create_task(web_server())
+    await tg_bot.delete_webhook(drop_pending_updates=True)
     await asyncio.gather(dp.start_polling(tg_bot), ds_bot.start(DISCORD_TOKEN))
 
 if __name__ == "__main__":
