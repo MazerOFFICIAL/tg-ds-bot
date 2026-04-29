@@ -48,46 +48,62 @@ async def handle_channel_post(message: types.Message):
     
     final_msg = []
     entities = []
-    reward_block = ""
-    tomorrow_block = ""
+    rewards = []
+    tomorrow = []
     
+    current_section = None
+
     for line in lines:
         if "ДЕНЬ" in line.upper():
             day_match = re.search(r'\d+', line)
             if day_match:
                 final_msg.append(f"**ДЕНЬ {day_match.group()}:**")
                 final_msg.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
-        
-        elif "Дверей" in line:
-            parts = line.split('—')
+            continue
+
+        if "Дверей" in line:
+            parts = re.split(r'[—–-]', line, 1)
             final_msg.append(f"***{parts[0].strip()}***")
             if len(parts) > 1:
                 locs = [loc.strip() for loc in parts[1].split(',') if loc.strip()]
                 final_msg.append(f"`{chr(10).join(locs)}`")
+            continue
 
-        elif "Проходится за" in line:
-            clean_time = line.lstrip('— ').strip()
-            final_msg.append(f"*— {clean_time}*")
+        if "Проходится за" in line:
+            final_msg.append(f"*— {line.lstrip('—–- ').strip()}*")
+            continue
 
-        elif "Награда:" in line:
-            val = line.replace("Награда:", "").strip()
-            formatted_val = val.replace('+', '\n+')
-            reward_block = f"**Награда:** **`{formatted_val}`**"
+        if "Награда:" in line:
+            current_section = "REWARD"
+            rewards.append(line.replace("Награда:", "").strip())
+            continue
+        
+        if "Завтра:" in line:
+            current_section = "TOMORROW"
+            tomorrow.append(line.replace("Завтра:", "").strip())
+            continue
 
-        elif "Завтра:" in line:
-            val = line.replace("Завтра:", "").strip()
-            formatted_val = val.replace('+', '\n+')
-            tomorrow_block = f"**Завтра:** **`{formatted_val}`**"
+        if current_section == "REWARD" and (line.startswith('+') or any(x in line for x in ['кнобсов', 'стардаста', 'ревайв'])):
+            rewards.append(line)
+            continue
+        
+        if current_section == "TOMORROW" and (line.startswith('+') or any(x in line for x in ['кнобсов', 'стардаста', 'ревайв'])):
+            tomorrow.append(line)
+            continue
 
-        else:
-            entities.append(f"**- {line}**")
+        if line and line not in ["—", "–", "-"]:
+            entities.append(f"**- {line.lstrip('—–- ').strip()}**")
 
     if entities:
         final_msg.append("\n".join(entities))
-    if reward_block:
-        final_msg.append(reward_block)
-    if tomorrow_block:
-        final_msg.append(tomorrow_block)
+
+    if rewards:
+        rew_text = "\n".join(rewards).replace('+', '\n+')
+        final_msg.append(f"**Награда:** **`{rew_text}`**")
+
+    if tomorrow:
+        tom_text = "\n".join(tomorrow).replace('+', '\n+')
+        final_msg.append(f"**Завтра:** **`{tom_text}`**")
 
     result_text = "\n".join(final_msg)
 
