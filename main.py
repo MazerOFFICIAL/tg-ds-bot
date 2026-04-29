@@ -47,17 +47,18 @@ async def handle_channel_post(message: types.Message):
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     
     final_msg = []
+    sections = []
     entities = []
     rewards = []
     tomorrow = []
     
-    current_section = None
+    current_mode = None
 
     for line in lines:
         if "ДЕНЬ" in line.upper():
             day_match = re.search(r'\d+', line)
-            if day_match:
-                final_msg.append(f"**ДЕНЬ {day_match.group()}:**")
+            if day_num := day_match:
+                final_msg.append(f"**ДЕНЬ {day_num.group()}:**")
                 final_msg.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
             continue
 
@@ -65,44 +66,51 @@ async def handle_channel_post(message: types.Message):
             parts = re.split(r'[—–-]', line, 1)
             final_msg.append(f"***{parts[0].strip()}***")
             if len(parts) > 1:
-                locs = [loc.strip() for loc in parts[1].split(',') if loc.strip()]
-                final_msg.append(f"`{chr(10).join(locs)}`")
+                loc_list = [loc.strip() for loc in parts[1].split(',') if loc.strip()]
+                sections.extend(loc_list)
+            current_mode = "SECTIONS"
             continue
 
         if "Проходится за" in line:
             final_msg.append(f"*— {line.lstrip('—–- ').strip()}*")
+            current_mode = "MONSTERS"
             continue
 
         if "Награда:" in line:
-            current_section = "REWARD"
+            current_mode = "REWARD"
             rewards.append(line.replace("Награда:", "").strip())
             continue
         
         if "Завтра:" in line:
-            current_section = "TOMORROW"
+            current_mode = "TOMORROW"
             tomorrow.append(line.replace("Завтра:", "").strip())
             continue
 
-        if current_section == "REWARD" and (line.startswith('+') or any(x in line for x in ['кнобсов', 'стардаста', 'ревайв'])):
+        if current_mode == "SECTIONS":
+            loc_list = [loc.strip() for loc in line.split(',') if loc.strip()]
+            sections.extend(loc_list)
+        elif current_mode == "MONSTERS":
+            if line not in ["—", "–", "-"]:
+                entities.append(line.lstrip('—–- ').strip())
+        elif current_mode == "REWARD":
             rewards.append(line)
-            continue
-        
-        if current_section == "TOMORROW" and (line.startswith('+') or any(x in line for x in ['кнобсов', 'стардаста', 'ревайв'])):
+        elif current_mode == "TOMORROW":
             tomorrow.append(line)
-            continue
 
-        if line and line not in ["—", "–", "-"]:
-            entities.append(f"**- {line.lstrip('—–- ').strip()}**")
+    if sections:
+        final_msg.append("`Секции:`")
+        for s in sections: final_msg.append(f"***{s}***")
 
     if entities:
-        final_msg.append("\n".join(entities))
+        final_msg.append("` Монстры:`")
+        for e in entities: final_msg.append(f"** {e}**")
 
     if rewards:
-        rew_text = "\n".join(rewards).replace('+', '\n+')
+        rew_text = "\n+".join([r.strip().lstrip('+').strip() for r in rewards if r.strip()])
         final_msg.append(f"**Награда:** **`{rew_text}`**")
 
     if tomorrow:
-        tom_text = "\n".join(tomorrow).replace('+', '\n+')
+        tom_text = "\n+".join([t.strip().lstrip('+').strip() for t in tomorrow if t.strip()])
         final_msg.append(f"**Завтра:** **`{tom_text}`**")
 
     result_text = "\n".join(final_msg)
@@ -116,7 +124,7 @@ async def handle_channel_post(message: types.Message):
         try:
             file_info = await tg_bot.get_file(file_id)
             downloaded = await tg_bot.download_file(file_info.file_path)
-            discord_file = discord.File(fp=io.BytesIO(downloaded.read()), filename="daily_run.jpg")
+            discord_file = discord.File(fp=io.BytesIO(downloaded.read()), filename="daily.jpg")
         except: pass
 
     try:
