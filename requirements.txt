@@ -1,3 +1,4 @@
 discord
 aiogram
 aiohttp
+beautifulsoup4
