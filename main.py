@@ -30,6 +30,10 @@ KNOWN_SECTIONS = [
 
 @dp.channel_post()
 async def handle_channel_post(message: types.Message):
+    msg_text = message.text or message.caption or ""
+    if "#dailyrun" not in msg_text.lower():
+        return
+
     ds_channel = ds_bot.get_channel(DISCORD_CHANNEL_ID)
     if not ds_channel: return
 
