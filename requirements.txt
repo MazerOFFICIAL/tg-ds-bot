@@ -1,0 +1,3 @@
+discord
+aiogram
+aiohttp
