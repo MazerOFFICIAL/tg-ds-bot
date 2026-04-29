@@ -23,6 +23,11 @@ async def on_ready():
 tg_bot = TgBot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
+KNOWN_SECTIONS = [
+    "Отель", "Оранжерея", "Румс", "Бэкдор", "Ретро-комнаты", 
+    "Шахты", "Rooms", "The Backdoor", "Hotel", "Greenhouse", "Mines"
+]
+
 @dp.channel_post()
 async def handle_channel_post(message: types.Message):
     ds_channel = ds_bot.get_channel(DISCORD_CHANNEL_ID)
@@ -47,82 +52,95 @@ async def handle_channel_post(message: types.Message):
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     
     final_msg = []
-    locs_found = []
-    monsters = []
+    sections = []
+    entities = []
     rewards = []
     tomorrow = []
-    current_sec = None
     
+    day_info = ""
+    doors_info = ""
+    time_info = ""
+    
+    mode = None
+
     for line in lines:
         if "ДЕНЬ" in line.upper():
-            day = re.search(r'\d+', line)
-            if day:
-                final_msg.append(f"**ДЕНЬ {day.group()}:**")
-                final_msg.append("⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯")
+            day_m = re.search(r'\d+', line)
+            if day_m:
+                day_info = f"**ДЕНЬ {day_m.group()}:**\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯"
             continue
 
         if "Дверей" in line:
-            parts = re.split(r'[—–-]', line, 1)
-            final_msg.append(f"***{parts[0].strip()}***")
-            if len(parts) > 1:
-                l_list = [loc.strip() for loc in parts[1].split(',') if loc.strip()]
-                locs_found.extend(l_list)
-            continue
-
-        if locs_found and not monsters and "Проходится за" not in line and "Награда" not in line:
-            l_list = [loc.strip() for loc in line.split(',') if loc.strip()]
-            locs_found.extend(l_list)
+            p = re.split(r'[—–-]', line, 1)
+            doors_info = f"***{p[0].strip()}***"
+            if len(p) > 1:
+                sub_locs = [s.strip() for s in p[1].split(',') if s.strip()]
+                sections.extend(sub_locs)
+            mode = "LOCS"
             continue
 
         if "Проходится за" in line:
-            if locs_found:
-                final_msg.append(f"`{chr(10).join(locs_found)}`")
-                locs_found = []
-            final_msg.append(f"*— {line.lstrip('—–- ').strip()}*")
-            current_sec = "MONS"
+            time_info = f"*— {line.lstrip('—–- ').strip()}*"
+            mode = "MONS"
             continue
 
         if "Награда:" in line:
-            current_sec = "REW"
-            v = line.replace("Награда:", "").strip()
-            if v: rewards.append(v)
+            mode = "REW"
+            val = line.replace("Награда:", "").strip()
+            if val: rewards.append(val)
             continue
-
+        
         if "Завтра:" in line:
-            current_sec = "TOM"
-            v = line.replace("Завтра:", "").strip()
-            if v: tomorrow.append(v)
+            mode = "TOM"
+            val = line.replace("Завтра:", "").strip()
+            if val: tomorrow.append(val)
             continue
 
-        if current_sec == "MONS":
-            monsters.append(line.lstrip('—–- ').strip())
-        elif current_sec == "REW":
+        if mode == "LOCS":
+            sub_locs = [s.strip() for s in line.split(',') if s.strip()]
+            sections.extend(sub_locs)
+        elif mode == "MONS":
+            clean_line = line.lstrip('—–- ').strip()
+            if any(word in clean_line for word in KNOWN_SECTIONS):
+                sections.append(clean_line)
+            elif clean_line not in ["—", "–", "-"]:
+                entities.append(clean_line)
+        elif mode == "REW":
             rewards.append(line)
-        elif current_sec == "TOM":
+        elif mode == "TOM":
             tomorrow.append(line)
 
-    if monsters:
-        m_block = "\n".join([f"- {m}" for m in monsters])
-        final_msg.append(f"**{m_block}**")
-
+    if day_info: final_msg.append(day_info)
+    if doors_info: final_msg.append(doors_info)
+    
+    if sections:
+        final_msg.append("`Секции:`")
+        for s in sections: final_msg.append(f"***{s}***")
+    
+    if time_info: final_msg.append(time_info)
+    
+    if entities:
+        final_msg.append("` Монстры:`")
+        for e in entities: final_msg.append(f"** {e}**")
+    
     if rewards:
-        r_str = "\n+".join([r.lstrip('+').strip() for r in rewards if r.strip()])
-        final_msg.append(f"**Награда:** **`{r_str}`**")
-
+        r_text = "\n+".join([r.lstrip('+').strip() for r in rewards if r.strip()])
+        final_msg.append(f"**Награда:** **`{r_text}`**")
+    
     if tomorrow:
-        t_str = "\n+".join([t.lstrip('+').strip() for t in tomorrow if t.strip()])
-        final_msg.append(f"**Завтра:** **`{t_str}`**")
+        t_text = "\n+".join([t.lstrip('+').strip() for t in tomorrow if t.strip()])
+        final_msg.append(f"**Завтра:** **`{t_text}`**")
 
     res = "\n".join(final_msg)
 
-    file_id = None
-    if message.photo: file_id = message.photo[-1].file_id
-    elif message.video: file_id = message.video.file_id
+    f_id = None
+    if message.photo: f_id = message.photo[-1].file_id
+    elif message.video: f_id = message.video.file_id
 
     d_file = None
-    if file_id:
+    if f_id:
         try:
-            f_info = await tg_bot.get_file(file_id)
+            f_info = await tg_bot.get_file(f_id)
             down = await tg_bot.download_file(f_info.file_path)
             d_file = discord.File(fp=io.BytesIO(down.read()), filename="daily.jpg")
         except: pass
